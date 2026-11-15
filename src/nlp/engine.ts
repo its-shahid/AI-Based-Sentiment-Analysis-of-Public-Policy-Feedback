@@ -1,13 +1,17 @@
 import type {
   EvaluationSummary,
   FeedbackRecord,
+  IngestionMetadata,
   LivePredictionResult,
   ModelBenchmarkResult,
   PerClassMetrics,
   PolicyExecutiveSummary,
   SentimentLabel,
+  SupportedFileType,
   TopicCluster,
+  TopicRelevanceMetrics,
 } from '../types/policy';
+import { parseCsvToRowObjects } from './fileParsers';
 
 const SENTIMENTS: SentimentLabel[] = ['Negative', 'Neutral', 'Positive'];
 
@@ -294,61 +298,47 @@ function predictProbsNB(model: TrainedNB, cleaned: string): Record<SentimentLabe
   };
 }
 
-// --- RFC-4180 CSV Parser ---
-function parseCsvRows(csvText: string): string[][] {
-  const clean = csvText.replace(/^\uFEFF/, '');
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = '';
-  let inQuotes = false;
+const COLUMN_ALIASES: Record<string, string[]> = {
+  feedback_text: [
+    'feedback_text', 'comment_text', 'public_comment', 'comment',
+    'feedback', 'text', 'opinion', 'review', 'message', 'response',
+    'remarks', 'suggestion', 'body', 'content', 'description',
+  ],
+  feedback_id: ['feedback_id', 'id', 'comment_id', 'record_id', 'sr_no', 'sno', 'ref_id'],
+  submitted_date: ['submitted_date', 'date', 'created_at', 'timestamp', 'submission_date', 'posted_at'],
+  region: ['region', 'state', 'location', 'city', 'district', 'area', 'zone'],
+  channel: ['channel', 'source', 'platform', 'portal', 'medium'],
+  policy_name: ['policy_name', 'policy', 'scheme', 'category', 'topic', 'department', 'subject'],
+  language: ['language', 'lang', 'locale'],
+  sentiment: ['sentiment', 'label', 'polarity', 'ground_truth'],
+};
 
-  for (let i = 0; i < clean.length; i++) {
-    const ch = clean[i];
-    const next = clean[i + 1];
+const POLICY_INFERENCE_RULES: Array<{ policy: string; keywords: string[] }> = [
+  { policy: 'National Digital Health Mission', keywords: ['health', 'hospital', 'doctor', 'clinic', 'telemedicine', 'अस्पताल', 'स्वास्थ्य', 'डॉक्टर'] },
+  { policy: 'Urban Clean Transit Subsidy', keywords: ['bus', 'metro', 'transit', 'ev ', 'electric vehicle', 'commute', 'transport', 'बस', 'मेट्रो', 'परिवहन'] },
+  { policy: 'National Education Reform', keywords: ['school', 'student', 'teacher', 'exam', 'education', 'scholarship', 'स्कूल', 'शिक्षा', 'छात्र', 'शिक्षक'] },
+  { policy: 'Rural Solar Microgrid Scheme', keywords: ['solar', 'microgrid', 'electricity', 'blackout', 'panel', 'सोलर', 'बिजली', 'सौर'] },
+  { policy: 'Smart Water Metering Initiative', keywords: ['water', 'meter', 'pipeline', 'leak', 'billing', 'पानी', 'मीटर', 'जल'] },
+  { policy: 'MSME Credit Guarantee Scheme', keywords: ['msme', 'loan', 'credit', 'bank', 'collateral', 'entrepreneur', 'ऋण', 'बैंक', 'उद्यमी'] },
+];
 
-    if (inQuotes) {
-      if (ch === '"' && next === '"') {
-        field += '"';
-        i++;
-      } else if (ch === '"') {
-        inQuotes = false;
-      } else {
-        field += ch;
-      }
-    } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ',') {
-        row.push(field);
-        field = '';
-      } else if (ch === '\r' && next === '\n') {
-        row.push(field);
-        rows.push(row);
-        row = [];
-        field = '';
-        i++;
-      } else if (ch === '\n' || ch === '\r') {
-        row.push(field);
-        rows.push(row);
-        row = [];
-        field = '';
-      } else {
-        field += ch;
-      }
+function inferPolicyFromText(text: string): string {
+  const lowered = text.toLowerCase();
+  for (const rule of POLICY_INFERENCE_RULES) {
+    if (rule.keywords.some((kw) => lowered.includes(kw))) {
+      return rule.policy;
     }
   }
-  if (field.length > 0 || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-  return rows.filter((r) => r.some((cell) => cell.trim().length > 0));
+  return 'General Public Policy';
 }
 
 function normalizeSubmittedDate(raw: string): { date: string; month: string } {
   const val = raw.trim();
-  if (!val) return { date: '2026-01-01', month: '2026-01' };
+  if (!val) {
+    const today = new Date().toISOString().slice(0, 10);
+    return { date: today, month: today.slice(0, 7) };
+  }
 
-  // Match YYYY-MM-DD or YYYY/MM/DD (with optional timestamp)
   const isoMatch = val.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
   if (isoMatch) {
     const [, y, m, d] = isoMatch;
@@ -357,7 +347,6 @@ function normalizeSubmittedDate(raw: string): { date: string; month: string } {
     return { date: `${y}-${mm}-${dd}`, month: `${y}-${mm}` };
   }
 
-  // Match DD-MM-YYYY or DD/MM/YYYY
   const dmyMatch = val.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
   if (dmyMatch) {
     const [, d, m, y] = dmyMatch;
@@ -372,61 +361,103 @@ function normalizeSubmittedDate(raw: string): { date: string; month: string } {
     return { date: iso, month: iso.slice(0, 7) };
   }
 
-  return { date: '2026-01-01', month: '2026-01' };
+  const today = new Date().toISOString().slice(0, 10);
+  return { date: today, month: today.slice(0, 7) };
 }
 
-export function ingestAndAnalyzeCsv(
-  csvText: string,
+function resolveAliases(rawKeys: string[]): {
+  mapping: Record<string, string>;
+  detectedColumns: Record<string, string>;
+  inferredColumns: string[];
+} {
+  const normalizedLookup = new Map<string, string>();
+  for (const rawKey of rawKeys) {
+    const norm = rawKey.trim().toLowerCase().replace(/\s+/g, '_');
+    if (!normalizedLookup.has(norm)) normalizedLookup.set(norm, rawKey);
+  }
+
+  const mapping: Record<string, string> = {};
+  const detectedColumns: Record<string, string> = {};
+  const inferredColumns: string[] = [];
+
+  for (const [canonical, aliases] of Object.entries(COLUMN_ALIASES)) {
+    let matchedRaw: string | undefined;
+    for (const alias of aliases) {
+      const candidate = normalizedLookup.get(alias);
+      if (candidate) {
+        matchedRaw = candidate;
+        break;
+      }
+    }
+    if (matchedRaw) {
+      mapping[canonical] = matchedRaw;
+      detectedColumns[canonical] = matchedRaw;
+    } else if (canonical !== 'sentiment') {
+      inferredColumns.push(canonical);
+    }
+  }
+
+  return { mapping, detectedColumns, inferredColumns };
+}
+
+export function ingestStructuredRows(
+  rawRows: Array<Record<string, string>>,
+  sourceInfo: { fileName: string; fileType: SupportedFileType },
   fallbackModel?: TrainedNB
 ): {
   records: FeedbackRecord[];
   model: TrainedNB;
-  rawRowCount: number;
-  droppedEmptyCount: number;
-  hasGroundTruth: boolean;
+  metadata: IngestionMetadata;
   error?: string;
 } {
-  const rawRows = parseCsvRows(csvText);
-  if (rawRows.length < 2) {
+  const emptyMeta: IngestionMetadata = {
+    fileName: sourceInfo.fileName,
+    fileType: sourceInfo.fileType,
+    rawRowCount: rawRows.length,
+    validRowCount: 0,
+    droppedEmptyCount: 0,
+    detectedColumns: {},
+    inferredColumns: [],
+    hasGroundTruth: false,
+  };
+
+  if (rawRows.length === 0) {
     return {
       records: [],
       model: fallbackModel ?? trainMultinomialNB([]),
-      rawRowCount: 0,
-      droppedEmptyCount: 0,
-      hasGroundTruth: false,
-      error: 'CSV file is empty or has no data rows.',
+      metadata: emptyMeta,
+      error: `No data rows found in "${sourceInfo.fileName}".`,
     };
   }
 
-  const headers = rawRows[0].map((h) => h.trim().toLowerCase());
-  const required = ['feedback_id', 'submitted_date', 'policy_name', 'region', 'channel', 'language', 'feedback_text'];
-  const missing = required.filter((col) => !headers.includes(col));
-  if (missing.length > 0) {
+  const rawKeys = Array.from(new Set(rawRows.flatMap((r) => Object.keys(r))));
+  const { mapping, detectedColumns, inferredColumns } = resolveAliases(rawKeys);
+
+  if (!mapping.feedback_text) {
+    const accepted = COLUMN_ALIASES.feedback_text.slice(0, 8).join(', ');
     return {
       records: [],
       model: fallbackModel ?? trainMultinomialNB([]),
-      rawRowCount: rawRows.length - 1,
-      droppedEmptyCount: 0,
-      hasGroundTruth: false,
-      error: `Missing required CSV columns: ${missing.join(', ')}`,
+      metadata: { ...emptyMeta, detectedColumns, inferredColumns },
+      error: `Could not detect a feedback text column in "${sourceInfo.fileName}". Found columns: [${rawKeys.join(', ')}]. Expected one of: ${accepted}.`,
     };
   }
 
-  const idxMap = Object.fromEntries(headers.map((h, idx) => [h, idx]));
-  const rawRowCount = rawRows.length - 1;
   let droppedEmptyCount = 0;
   const parsed: Array<Omit<FeedbackRecord, 'predicted_sentiment' | 'confidence'>> = [];
 
-  for (let i = 1; i < rawRows.length; i++) {
+  for (let i = 0; i < rawRows.length; i++) {
     const r = rawRows[i];
-    const feedbackText = (r[idxMap.feedback_text] ?? '').trim();
+    const feedbackText = (r[mapping.feedback_text] ?? '').trim();
     if (feedbackText.length === 0) {
       droppedEmptyCount += 1;
       continue;
     }
 
-    const { date: submittedDate, month } = normalizeSubmittedDate(r[idxMap.submitted_date] ?? '');
-    const rawSentiment = idxMap.sentiment !== undefined ? (r[idxMap.sentiment] ?? '').trim() : '';
+    const rawDate = mapping.submitted_date ? (r[mapping.submitted_date] ?? '') : '';
+    const { date: submittedDate, month } = normalizeSubmittedDate(rawDate);
+
+    const rawSentiment = mapping.sentiment ? (r[mapping.sentiment] ?? '').trim() : '';
     const titleSentiment = rawSentiment
       ? rawSentiment.charAt(0).toUpperCase() + rawSentiment.slice(1).toLowerCase()
       : '';
@@ -436,16 +467,19 @@ export function ingestAndAnalyzeCsv(
         : 'Neutral';
 
     const cleaned = cleanText(feedbackText, true) || cleanText(feedbackText, false);
-    const rawId = (r[idxMap.feedback_id] ?? '').trim();
-    const rawLang = (r[idxMap.language] ?? '').trim();
+    const rawId = mapping.feedback_id ? (r[mapping.feedback_id] ?? '').trim() : '';
+    const rawPolicy = mapping.policy_name ? (r[mapping.policy_name] ?? '').trim() : '';
+    const rawRegion = mapping.region ? (r[mapping.region] ?? '').trim() : '';
+    const rawChannel = mapping.channel ? (r[mapping.channel] ?? '').trim() : '';
+    const rawLang = mapping.language ? (r[mapping.language] ?? '').trim() : '';
 
     parsed.push({
-      feedback_id: rawId || `FB-${String(i).padStart(4, '0')}`,
+      feedback_id: rawId || `FB-${String(parsed.length + 1).padStart(4, '0')}`,
       submitted_date: submittedDate,
       month,
-      policy_name: (r[idxMap.policy_name] ?? '').trim() || 'General Policy',
-      region: (r[idxMap.region] ?? '').trim() || 'National',
-      channel: (r[idxMap.channel] ?? '').trim() || 'Web Portal',
+      policy_name: rawPolicy || inferPolicyFromText(feedbackText),
+      region: rawRegion || 'National',
+      channel: rawChannel || `${sourceInfo.fileType} Upload`,
       language: rawLang || detectLanguage(feedbackText),
       feedback_text: feedbackText,
       sentiment: normSentiment,
@@ -457,14 +491,12 @@ export function ingestAndAnalyzeCsv(
     return {
       records: [],
       model: fallbackModel ?? trainMultinomialNB([]),
-      rawRowCount,
-      droppedEmptyCount,
-      hasGroundTruth: false,
-      error: 'No valid non-empty feedback rows found.',
+      metadata: { ...emptyMeta, droppedEmptyCount, detectedColumns, inferredColumns },
+      error: `No non-empty feedback comments were found in "${sourceInfo.fileName}".`,
     };
   }
 
-  const hasGroundTruth = headers.includes('sentiment');
+  const hasGroundTruth = Boolean(mapping.sentiment);
   const model = hasGroundTruth
     ? trainMultinomialNB(
         parsed.map((p) => ({ cleaned_text: p.cleaned_text, sentiment: p.sentiment }))
@@ -492,7 +524,34 @@ export function ingestAndAnalyzeCsv(
     };
   });
 
-  return { records, model, rawRowCount, droppedEmptyCount, hasGroundTruth };
+  return {
+    records,
+    model,
+    metadata: {
+      fileName: sourceInfo.fileName,
+      fileType: sourceInfo.fileType,
+      rawRowCount: rawRows.length,
+      validRowCount: records.length,
+      droppedEmptyCount,
+      detectedColumns,
+      inferredColumns,
+      hasGroundTruth,
+    },
+  };
+}
+
+export function ingestAndAnalyzeCsv(
+  csvText: string,
+  fallbackModel?: TrainedNB,
+  fileName = 'public_policy_feedback.csv'
+): {
+  records: FeedbackRecord[];
+  model: TrainedNB;
+  metadata: IngestionMetadata;
+  error?: string;
+} {
+  const rawRows = parseCsvToRowObjects(csvText);
+  return ingestStructuredRows(rawRows, { fileName, fileType: 'CSV' }, fallbackModel);
 }
 
 export function predictSingleFeedback(rawText: string, model: TrainedNB): LivePredictionResult {
@@ -696,6 +755,7 @@ export function generatePolicySummary(records: FeedbackRecord[], policyName: str
       policy_name: policyName,
       total_responses: 0,
       breakdown: { Positive: 0, Neutral: 0, Negative: 0 },
+      plain_language_verdict: `No feedback responses matched the current filters for ${policyName}.`,
       positive_highlights: [],
       concern_highlights: [],
       suggestion_highlights: [],
@@ -709,18 +769,77 @@ export function generatePolicySummary(records: FeedbackRecord[], policyName: str
     byClass[r.predicted_sentiment].push(r.feedback_text);
   }
 
+  const posPct = Number(((counts.Positive / total) * 100).toFixed(1));
+  const neuPct = Number(((counts.Neutral / total) * 100).toFixed(1));
+  const negPct = Number(((counts.Negative / total) * 100).toFixed(1));
+
+  let stance = 'mixed and balanced';
+  if (posPct >= negPct + 10) stance = 'predominantly supportive';
+  else if (negPct >= posPct + 10) stance = 'predominantly critical';
+
+  const plain_language_verdict = `Across ${total.toLocaleString()} analyzed citizen responses for ${policyName}, public sentiment is ${stance} (${posPct}% in favor, ${neuPct}% offering constructive recommendations, and ${negPct}% raising operational concerns).`;
+
   return {
     policy_name: policyName,
     total_responses: total,
     breakdown: {
-      Positive: Number(((counts.Positive / total) * 100).toFixed(1)),
-      Neutral: Number(((counts.Neutral / total) * 100).toFixed(1)),
-      Negative: Number(((counts.Negative / total) * 100).toFixed(1)),
+      Positive: posPct,
+      Neutral: neuPct,
+      Negative: negPct,
     },
+    plain_language_verdict,
     positive_highlights: textRankSentences(byClass.Positive, 3),
     concern_highlights: textRankSentences(byClass.Negative, 3),
     suggestion_highlights: textRankSentences(byClass.Neutral, 3),
   };
+}
+
+export function computeTopicRelevance(
+  topics: TopicCluster[],
+  records: FeedbackRecord[]
+): TopicRelevanceMetrics {
+  if (topics.length === 0 || records.length === 0) {
+    return { distinctiveness: 0, coherence: 0, coveragePercent: 0 };
+  }
+
+  const allKws = topics.flatMap((t) => t.keywords);
+  const distinctiveness = Number((new Set(allKws).size / Math.max(1, allKws.length)).toFixed(4));
+
+  const docSets = records.map((r) => new Set(r.cleaned_text.split(/\s+/).filter(Boolean)));
+  const nDocs = docSets.length;
+  const pairScores: number[] = [];
+
+  for (const t of topics) {
+    const kws = t.keywords.slice(0, 5);
+    for (let i = 0; i < kws.length; i++) {
+      for (let j = i + 1; j < kws.length; j++) {
+        let c1 = 0;
+        let c2 = 0;
+        let c12 = 0;
+        for (const d of docSets) {
+          const has1 = d.has(kws[i]);
+          const has2 = d.has(kws[j]);
+          if (has1) c1++;
+          if (has2) c2++;
+          if (has1 && has2) c12++;
+        }
+        if (c1 > 0 && c2 > 0 && c12 > 0) {
+          const pmi = Math.log((c12 * nDocs) / (c1 * c2));
+          const npmi = pmi / Math.max(1e-6, -Math.log(c12 / nDocs));
+          pairScores.push(npmi);
+        }
+      }
+    }
+  }
+
+  const coherence = pairScores.length > 0
+    ? Number((pairScores.reduce((a, b) => a + b, 0) / pairScores.length).toFixed(4))
+    : 0;
+
+  const assigned = topics.reduce((acc, t) => acc + t.document_count, 0);
+  const coveragePercent = Number(Math.min(100, (assigned / nDocs) * 100).toFixed(1));
+
+  return { distinctiveness, coherence, coveragePercent };
 }
 
 // --- Real Stratified Train/Test Model Evaluation ---

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   BarChart3,
   Code2,
@@ -14,8 +14,14 @@ import {
   X,
 } from 'lucide-react';
 import { downloadPythonProjectZip, getDefaultCsvText } from './data/projectBundle';
-import { ingestAndAnalyzeCsv } from './nlp/engine';
-import type { SentimentLabel } from './types/policy';
+import { ingestAndAnalyzeCsv, ingestStructuredRows } from './nlp/engine';
+import { parseUploadedFile } from './nlp/fileParsers';
+import type {
+  FeedbackRecord,
+  IngestionMetadata,
+  SentimentLabel,
+} from './types/policy';
+import { FileUploadPanel } from './components/FileUploadPanel';
 import { OverviewTab } from './components/OverviewTab';
 import { TopicsSummaryTab } from './components/TopicsSummaryTab';
 import { ExplorerTab } from './components/ExplorerTab';
@@ -25,39 +31,69 @@ import { PythonProjectTab } from './components/PythonProjectTab';
 
 type ActiveView = 'overview' | 'topics' | 'explorer' | 'live' | 'evaluation' | 'python';
 
-const NAV_ITEMS: Array<{ id: ActiveView; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { id: 'overview', label: 'Overview & Trends', icon: BarChart3 },
-  { id: 'topics', label: 'Topics & Summary', icon: Layers },
-  { id: 'explorer', label: 'Feedback Explorer', icon: Table2 },
-  { id: 'live', label: 'Live Analyzer', icon: Languages },
-  { id: 'evaluation', label: 'Model Evaluation', icon: Gauge },
-  { id: 'python', label: 'Python & Docs', icon: Code2 },
+const NAV_ITEMS: Array<{
+  id: ActiveView;
+  label: string;
+  subtitle: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  {
+    id: 'overview',
+    label: 'Overview & Trends',
+    subtitle: 'Executive KPI summary, temporal trends, and policy polarity comparison',
+    icon: BarChart3,
+  },
+  {
+    id: 'topics',
+    label: 'Topics & Summary',
+    subtitle: 'Recurring citizen concerns, suggestions, and plain-language policy verdict',
+    icon: Layers,
+  },
+  {
+    id: 'explorer',
+    label: 'Feedback Explorer',
+    subtitle: 'Search, sort, inspect preprocessed NLP tokens, and export filtered datasets',
+    icon: Table2,
+  },
+  {
+    id: 'live',
+    label: 'Live Analyzer',
+    subtitle: 'Real-time sentiment scoring for English, Hindi, and Hinglish submissions',
+    icon: Languages,
+  },
+  {
+    id: 'evaluation',
+    label: 'Model Evaluation',
+    subtitle: 'Confusion matrix, macro F1 benchmarks, and topic-extraction relevance',
+    icon: Gauge,
+  },
+  {
+    id: 'python',
+    label: 'Python & Docs',
+    subtitle: 'Downloadable Streamlit/Scikit-Learn codebase, setup guide, and project reports',
+    icon: Code2,
+  },
 ];
 
 export default function App() {
   const [activeView, setActiveView] = useState<ActiveView>('overview');
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const [showUploadPanelDrawer, setShowUploadPanelDrawer] = useState<boolean>(false);
 
-  // Dataset State
-  const [datasetName, setDatasetName] = useState<string>('public_policy_feedback.csv');
-  const [csvText, setCsvText] = useState<string>(() => getDefaultCsvText());
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const defaultIngestion = useMemo(() => ingestAndAnalyzeCsv(getDefaultCsvText()), []);
-
-  const {
-    records,
-    model,
-    rawRowCount,
-    droppedEmptyCount,
-    hasGroundTruth,
-    error: parseError,
-  } = useMemo(
-    () => ingestAndAnalyzeCsv(csvText, defaultIngestion.model),
-    [csvText, defaultIngestion.model]
+  // Baseline trained model & bundled 600-row corpus
+  const defaultIngestion = useMemo(
+    () => ingestAndAnalyzeCsv(getDefaultCsvText(), undefined, 'public_policy_feedback.csv'),
+    []
   );
+
+  // Active Dataset State (supports CSV, XLSX, XLS, JSON, TXT, PDF)
+  const [records, setRecords] = useState<FeedbackRecord[]>(() => defaultIngestion.records);
+  const [activeModel, setActiveModel] = useState(() => defaultIngestion.model);
+  const [metadata, setMetadata] = useState<IngestionMetadata>(() => defaultIngestion.metadata);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  const [isCustomDataset, setIsCustomDataset] = useState<boolean>(false);
 
   // Interactive Filters
   const [selectedPolicy, setSelectedPolicy] = useState<string>('All Policies');
@@ -111,72 +147,95 @@ export default function App() {
     setSearchQuery('');
   };
 
-  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const content = String(reader.result ?? '');
-      const check = ingestAndAnalyzeCsv(content, defaultIngestion.model);
-      if (check.error) {
-        setUploadError(check.error);
-        setUploadNotice(null);
-      } else {
-        setUploadError(null);
-        setCsvText(content);
-        setDatasetName(file.name);
-        const skippedNote =
-          check.droppedEmptyCount > 0
-            ? ` (${check.droppedEmptyCount} blank row${check.droppedEmptyCount > 1 ? 's' : ''} skipped)`
-            : '';
-        setUploadNotice(
-          `Loaded ${check.records.length.toLocaleString()} of ${check.rawRowCount.toLocaleString()} feedback records from "${file.name}"${skippedNote}.`
-        );
-        resetFilters();
+  const handleFileUpload = async (file: File) => {
+    setIsUploading(true);
+    setUploadError(null);
+    setUploadSuccess(null);
+
+    try {
+      const parsed = await parseUploadedFile(file);
+      if (parsed.error) {
+        setUploadError(parsed.error);
+        return;
       }
-    };
-    reader.onerror = () => {
-      setUploadError('Unable to read the selected CSV file.');
-      setUploadNotice(null);
-    };
-    reader.readAsText(file);
-    e.target.value = '';
+
+      const analyzed = ingestStructuredRows(
+        parsed.rows,
+        { fileName: parsed.fileName, fileType: parsed.fileType },
+        defaultIngestion.model
+      );
+
+      if (analyzed.error) {
+        setUploadError(analyzed.error);
+        return;
+      }
+
+      setRecords(analyzed.records);
+      setActiveModel(analyzed.model);
+      setMetadata(analyzed.metadata);
+      setIsCustomDataset(true);
+
+      const skippedNote =
+        analyzed.metadata.droppedEmptyCount > 0
+          ? ` (${analyzed.metadata.droppedEmptyCount} empty row${
+              analyzed.metadata.droppedEmptyCount > 1 ? 's' : ''
+            } skipped)`
+          : '';
+
+      setUploadSuccess(
+        `Loaded ${analyzed.records.length.toLocaleString()} valid feedback comments out of ${analyzed.metadata.rawRowCount.toLocaleString()} extracted entries from "${file.name}" (${parsed.fileType})${skippedNote}.`
+      );
+      resetFilters();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unable to parse uploaded file.';
+      setUploadError(msg);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  const resetToDefaultDataset = () => {
-    setCsvText(getDefaultCsvText());
-    setDatasetName('public_policy_feedback.csv');
+  const restoreDefaultDataset = () => {
+    setRecords(defaultIngestion.records);
+    setActiveModel(defaultIngestion.model);
+    setMetadata(defaultIngestion.metadata);
+    setIsCustomDataset(false);
     setUploadError(null);
-    setUploadNotice(null);
+    setUploadSuccess(null);
     resetFilters();
   };
 
-  const currentTabTitle = NAV_ITEMS.find((n) => n.id === activeView)?.label ?? 'Dashboard';
+  const activeNav = NAV_ITEMS.find((n) => n.id === activeView) ?? NAV_ITEMS[0];
+  const isOverview = activeView === 'overview';
 
   return (
-    <div className="min-h-screen flex bg-slate-50 text-slate-900">
+    <div className="min-h-screen flex bg-[#F4F7FC] text-[#0B1F3A]">
       {/* Mobile Sidebar Backdrop */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-30 bg-slate-900/40 lg:hidden"
+          className="fixed inset-0 z-30 bg-[#0B1F3A]/50 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* Left Sidebar (264px) */}
+      {/* Left Navy Blue Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-white border-r border-slate-200 flex flex-col transition-transform duration-200 lg:translate-x-0 ${
+        className={`fixed lg:static inset-y-0 left-0 z-40 w-72 bg-[#0B1F3A] text-white flex flex-col transition-transform duration-200 lg:translate-x-0 shrink-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-          <span className="font-display text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap">
-            CivicPulse
-          </span>
+        <div className="px-6 py-5 border-b border-[#163A70] flex items-center justify-between">
+          <div>
+            <div className="font-display text-[22px] font-bold tracking-tight text-white leading-none">
+              CivicPulse
+            </div>
+            <div className="text-[13px] text-[#93C5FD] mt-1 font-medium">
+              Public Policy Sentiment AI
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => setSidebarOpen(false)}
-            className="lg:hidden p-1 text-slate-500 hover:text-slate-900 cursor-pointer"
+            className="lg:hidden p-1.5 text-slate-300 hover:text-white cursor-pointer"
             aria-label="Close navigation"
           >
             <X className="w-5 h-5" />
@@ -184,7 +243,7 @@ export default function App() {
         </div>
 
         {/* Navigation Links */}
-        <nav className="p-3 space-y-1 border-b border-slate-200">
+        <nav className="p-4 space-y-1.5 border-b border-[#163A70]">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = activeView === item.id;
@@ -196,10 +255,10 @@ export default function App() {
                   setActiveView(item.id);
                   setSidebarOpen(false);
                 }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-[15px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
                   active
-                    ? 'bg-blue-700 text-white'
-                    : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+                    ? 'bg-[#2563EB] text-white shadow-sm'
+                    : 'text-[#CBD5E1] hover:bg-[#163A70] hover:text-white'
                 }`}
               >
                 <Icon className="w-4 h-4 shrink-0" />
@@ -210,48 +269,48 @@ export default function App() {
         </nav>
 
         {/* Interactive Dataset Filters */}
-        <div className="p-4 space-y-4 overflow-y-auto flex-1 text-xs">
+        <div className="p-5 space-y-4 overflow-y-auto flex-1 text-[15px]">
           <div className="flex items-center justify-between">
-            <span className="font-semibold text-slate-800">Dataset Filters</span>
+            <span className="font-semibold text-white">Dataset Filters</span>
             <button
               type="button"
               onClick={resetFilters}
-              className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-900 cursor-pointer"
+              className="inline-flex items-center gap-1.5 text-[14px] text-[#93C5FD] hover:text-white cursor-pointer"
             >
-              <RotateCcw className="w-3 h-3" />
+              <RotateCcw className="w-3.5 h-3.5" />
               Reset
             </button>
           </div>
 
           <div>
-            <label htmlFor="search-filter" className="block text-slate-600 font-medium mb-1">
+            <label htmlFor="search-filter" className="block text-[#CBD5E1] font-medium mb-1.5 text-[14px]">
               Keyword Search
             </label>
             <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              <Search className="w-4 h-4 text-[#93C5FD] absolute left-3 top-3" />
               <input
                 id="search-filter"
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="subsidy, देरी, portal..."
-                className="w-full pl-8 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-md text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                className="w-full pl-9 pr-3 py-2 bg-[#163A70] border border-[#295496] rounded-lg text-[15px] text-white placeholder-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
               />
             </div>
           </div>
 
           <div>
-            <label htmlFor="policy-filter" className="block text-slate-600 font-medium mb-1">
+            <label htmlFor="policy-filter" className="block text-[#CBD5E1] font-medium mb-1.5 text-[14px]">
               Public Policy Scheme
             </label>
             <select
               id="policy-filter"
               value={selectedPolicy}
               onChange={(e) => setSelectedPolicy(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-md text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+              className="w-full px-3 py-2 bg-[#163A70] border border-[#295496] rounded-lg text-[15px] text-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
             >
               {policies.map((p) => (
-                <option key={p} value={p}>
+                <option key={p} value={p} className="bg-[#0B1F3A] text-white">
                   {p}
                 </option>
               ))}
@@ -259,17 +318,17 @@ export default function App() {
           </div>
 
           <div>
-            <label htmlFor="language-filter" className="block text-slate-600 font-medium mb-1">
+            <label htmlFor="language-filter" className="block text-[#CBD5E1] font-medium mb-1.5 text-[14px]">
               Language
             </label>
             <select
               id="language-filter"
               value={selectedLanguage}
               onChange={(e) => setSelectedLanguage(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-md text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+              className="w-full px-3 py-2 bg-[#163A70] border border-[#295496] rounded-lg text-[15px] text-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
             >
               {languages.map((l) => (
-                <option key={l} value={l}>
+                <option key={l} value={l} className="bg-[#0B1F3A] text-white">
                   {l === 'All' ? 'All Languages' : l}
                 </option>
               ))}
@@ -277,17 +336,17 @@ export default function App() {
           </div>
 
           <div>
-            <label htmlFor="region-filter" className="block text-slate-600 font-medium mb-1">
+            <label htmlFor="region-filter" className="block text-[#CBD5E1] font-medium mb-1.5 text-[14px]">
               Region / State
             </label>
             <select
               id="region-filter"
               value={selectedRegion}
               onChange={(e) => setSelectedRegion(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-md text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+              className="w-full px-3 py-2 bg-[#163A70] border border-[#295496] rounded-lg text-[15px] text-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
             >
               {regions.map((r) => (
-                <option key={r} value={r}>
+                <option key={r} value={r} className="bg-[#0B1F3A] text-white">
                   {r}
                 </option>
               ))}
@@ -295,8 +354,10 @@ export default function App() {
           </div>
 
           <div>
-            <span className="block text-slate-600 font-medium mb-1.5">Sentiment Classes</span>
-            <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-md">
+            <span className="block text-[#CBD5E1] font-medium mb-2 text-[14px]">
+              Sentiment Classes
+            </span>
+            <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#163A70] rounded-lg">
               {(['Positive', 'Neutral', 'Negative'] as SentimentLabel[]).map((s) => {
                 const active = selectedSentiments.includes(s);
                 return (
@@ -304,10 +365,10 @@ export default function App() {
                     key={s}
                     type="button"
                     onClick={() => toggleSentiment(s)}
-                    className={`py-1 px-1.5 rounded-sm text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                    className={`py-1.5 px-2 rounded-md text-[13px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                       active
-                        ? 'bg-white text-slate-900 shadow-xs'
-                        : 'text-slate-500 hover:text-slate-800'
+                        ? 'bg-[#2563EB] text-white shadow-xs'
+                        : 'text-[#CBD5E1] hover:text-white'
                     }`}
                   >
                     {s}
@@ -317,29 +378,20 @@ export default function App() {
             </div>
           </div>
 
-          <div className="pt-3 border-t border-slate-200 space-y-1.5 text-[11px] text-slate-500">
-            <div className="truncate font-mono" title={datasetName}>
-              Source: {datasetName}
+          <div className="pt-4 border-t border-[#163A70] space-y-1.5 text-[14px] text-[#CBD5E1]">
+            <div className="truncate font-mono text-white" title={metadata.fileName}>
+              Source: {metadata.fileName}
             </div>
             <div className="font-mono tabular-nums">
-              Loaded: {records.length.toLocaleString()} / {rawRowCount.toLocaleString()} rows
+              Loaded: {records.length.toLocaleString()} / {metadata.rawRowCount.toLocaleString()} rows
             </div>
-            <div className="font-mono tabular-nums">
+            <div className="font-mono tabular-nums text-[#93C5FD]">
               Active: {filteredRecords.length.toLocaleString()} / {records.length.toLocaleString()} rows
             </div>
-            {droppedEmptyCount > 0 && (
-              <div className="font-mono tabular-nums text-amber-700">
-                Skipped empty: {droppedEmptyCount}
+            {metadata.droppedEmptyCount > 0 && (
+              <div className="font-mono tabular-nums text-[#FCD34D]">
+                Skipped empty: {metadata.droppedEmptyCount}
               </div>
-            )}
-            {datasetName !== 'public_policy_feedback.csv' && (
-              <button
-                type="button"
-                onClick={resetToDefaultDataset}
-                className="text-blue-700 hover:underline font-medium cursor-pointer"
-              >
-                Restore bundled 600-row CSV
-              </button>
             )}
           </div>
         </div>
@@ -347,80 +399,65 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Contextual Top Bar */}
-        <header className="bg-white border-b border-slate-200 px-6 py-3.5 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
+        {/* Clean White Header */}
+        <header className="bg-white border-b border-[#DCE5F2] px-6 py-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5 min-w-0">
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-1.5 text-slate-600 hover:text-slate-900 border border-slate-200 rounded-md cursor-pointer"
+              className="lg:hidden p-2 text-[#0B1F3A] hover:bg-[#F4F7FC] border border-[#DCE5F2] rounded-lg cursor-pointer"
               aria-label="Open navigation"
             >
-              <Menu className="w-4 h-4" />
+              <Menu className="w-5 h-5" />
             </button>
-            <div className="text-sm text-slate-500 truncate">
-              <span>Public Policy Sentiment AI</span>
-              <span className="mx-2 text-slate-300">/</span>
-              <span className="font-semibold text-slate-900">{currentTabTitle}</span>
+            <div className="min-w-0">
+              <h1 className="text-[26px] md:text-[28px] font-bold tracking-tight text-[#0B1F3A] leading-tight truncate">
+                {activeNav.label}
+              </h1>
+              <p className="text-[14px] md:text-[15px] text-[#475569] truncate mt-0.5">
+                {activeNav.subtitle}
+              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              onChange={handleCsvUpload}
-              className="hidden"
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50 whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              Upload CSV
-            </button>
+            {!isOverview && (
+              <button
+                type="button"
+                onClick={() => setShowUploadPanelDrawer((prev) => !prev)}
+                className="inline-flex items-center gap-2 px-3.5 py-2.5 text-[14px] font-semibold text-[#163A70] bg-[#F4F7FC] hover:bg-[#E0EAFF] border border-[#CBD8EC] rounded-lg whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+              >
+                <Upload className="w-4 h-4" />
+                {showUploadPanelDrawer ? 'Hide Uploader' : 'Upload Dataset'}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => downloadPythonProjectZip()}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-md whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 text-[14px] font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg whitespace-nowrap shrink-0 cursor-pointer transition-colors"
             >
-              <Download className="w-3.5 h-3.5" />
+              <Download className="w-4 h-4" />
               Download Python ZIP
             </button>
           </div>
         </header>
 
-        {/* Validation Confirmation / Error Banners */}
-        {uploadNotice && !uploadError && !parseError && (
-          <div className="mx-6 mt-4 p-3.5 bg-emerald-50 border border-emerald-200 rounded-md text-xs text-emerald-900 flex items-center justify-between gap-4">
-            <span className="font-medium">{uploadNotice}</span>
-            <button
-              type="button"
-              onClick={() => setUploadNotice(null)}
-              className="font-semibold underline cursor-pointer shrink-0"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {(uploadError || parseError) && (
-          <div className="mx-6 mt-4 p-3.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-800 flex items-center justify-between">
-            <span>CSV Error: {uploadError || parseError}</span>
-            <button
-              type="button"
-              onClick={() => setUploadError(null)}
-              className="font-semibold underline cursor-pointer"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
         {/* Active View Viewport */}
-        <main className="p-6 max-w-7xl w-full mx-auto flex-1">
+        <main className="p-6 max-w-7xl w-full mx-auto flex-1 space-y-6">
+          {(isOverview || showUploadPanelDrawer) && (
+            <FileUploadPanel
+              metadata={metadata}
+              isLoading={isUploading}
+              uploadError={uploadError}
+              uploadSuccess={uploadSuccess}
+              isCustomDataset={isCustomDataset}
+              onFileSelected={handleFileUpload}
+              onRestoreDefault={restoreDefaultDataset}
+              onDismissNotice={() => setUploadSuccess(null)}
+              onDismissError={() => setUploadError(null)}
+            />
+          )}
+
           {activeView === 'overview' && (
             <OverviewTab records={filteredRecords} totalLoaded={records.length} />
           )}
@@ -428,11 +465,11 @@ export default function App() {
             <TopicsSummaryTab records={filteredRecords} selectedPolicy={selectedPolicy} />
           )}
           {activeView === 'explorer' && <ExplorerTab records={filteredRecords} />}
-          {activeView === 'live' && <LiveAnalyzerTab model={model} />}
+          {activeView === 'live' && <LiveAnalyzerTab model={activeModel} />}
           {activeView === 'evaluation' && (
             <EvaluationTab
               records={records}
-              hasGroundTruth={hasGroundTruth}
+              hasGroundTruth={metadata.hasGroundTruth}
               fallbackRecords={defaultIngestion.records}
             />
           )}

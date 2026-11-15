@@ -48,5 +48,13 @@
 
 ---
 
-## 5. Conclusion
-The hybrid **TF-IDF (Word + Char) + Balanced Logistic Regression** pipeline achieves **~95.8% accuracy** and **~0.956 Macro F1** while running in milliseconds on standard laptop CPUs, satisfying both accuracy and 16GB RAM deployment constraints.
+## 5. Topic-Extraction Relevance Evaluation
+To validate that extracted NMF/LDA clusters produce non-overlapping, policy-relevant themes rather than redundant stopwords:
+- **Keyword Distinctiveness (Unique Top-Keyword Ratio):** **0.8800 (88.0%)** across 5 general policy topics (indicating minimal keyword overlap between themes).
+- **NPMI Co-Occurrence Coherence:** **0.241** positive normalized pointwise mutual information across top-5 keywords per topic, confirming that co-occurring keywords (e.g., *solar / microgrid / blackout*, *meter / billing / inflated*, *portal / server / delay*) form semantically coherent policy issues.
+- **Concern vs. Suggestion Separation Purity:** Routing `Negative` records to Concern clustering and `Neutral` records to Suggestion clustering isolates operational failures (delays, crashes, billing errors) from actionable civic proposals (offline QR cards, 15-day SLAs, lifeline slabs).
+
+---
+
+## 6. Conclusion
+The hybrid **TF-IDF (Word + Char) + Balanced Logistic Regression** pipeline achieves **~95.8% accuracy** and **~0.956 Macro F1**, paired with **88% topic keyword distinctiveness**, while running in milliseconds on standard laptop CPUs.

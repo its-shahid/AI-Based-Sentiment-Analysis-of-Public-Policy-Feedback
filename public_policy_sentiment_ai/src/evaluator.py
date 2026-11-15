@@ -136,6 +136,48 @@ def evaluate_and_select_best_model(
     return analyzer, summary_payload
 
 
+def compute_topic_relevance_metrics(
+    topics: List[Dict[str, Any]],
+    cleaned_texts: pd.Series,
+) -> Dict[str, float]:
+    """
+    Evaluate extracted topic quality via:
+    - Keyword Distinctiveness: fraction of unique keywords across all topics.
+    - Co-occurrence Coherence: average PMI-normalized co-occurrence among top topic keywords.
+    """
+    if not topics:
+        return {"topic_distinctiveness": 0.0, "coherence_score": 0.0, "coverage_percent": 0.0}
+
+    all_keywords = [kw for t in topics for kw in t.get("keywords", [])]
+    distinctiveness = len(set(all_keywords)) / max(1, len(all_keywords))
+
+    doc_sets = [set(str(txt).split()) for txt in cleaned_texts.dropna()]
+    n_docs = max(1, len(doc_sets))
+
+    pair_scores: List[float] = []
+    for t in topics:
+        kws = list(t.get("keywords", []))[:5]
+        for i in range(len(kws)):
+            for j in range(i + 1, len(kws)):
+                w1, w2 = kws[i], kws[j]
+                c1 = sum(1 for d in doc_sets if w1 in d)
+                c2 = sum(1 for d in doc_sets if w2 in d)
+                c12 = sum(1 for d in doc_sets if w1 in d and w2 in d)
+                if c1 > 0 and c2 > 0 and c12 > 0:
+                    pmi = np.log((c12 * n_docs) / (c1 * c2))
+                    npmi = pmi / max(1e-6, -np.log(c12 / n_docs))
+                    pair_scores.append(float(npmi))
+
+    total_assigned = sum(int(t.get("document_count", 0)) for t in topics)
+    coverage = min(100.0, (total_assigned / n_docs) * 100.0)
+
+    return {
+        "topic_distinctiveness": round(float(distinctiveness), 4),
+        "coherence_score": round(float(np.mean(pair_scores)) if pair_scores else 0.0, 4),
+        "coverage_percent": round(float(coverage), 1),
+    }
+
+
 def load_saved_evaluation(path: Path = EVAL_METRICS_PATH) -> Dict[str, Any]:
     """Load persisted model benchmark metrics JSON if available."""
     if not path.exists():

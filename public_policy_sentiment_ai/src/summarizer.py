@@ -74,27 +74,49 @@ def generate_policy_executive_summary(df: pd.DataFrame, policy_name: str = "All 
             "policy_name": policy_name,
             "total_responses": 0,
             "sentiment_breakdown": {"Positive": 0.0, "Neutral": 0.0, "Negative": 0.0},
+            "plain_language_verdict": f"No feedback responses matched the current filters for {policy_name}.",
             "positive_highlights": [],
             "concern_highlights": [],
             "suggestion_highlights": [],
         }
 
     counts = subset[sentiment_col].value_counts()
+    pos_pct = round((counts.get("Positive", 0) / total) * 100.0, 1)
+    neu_pct = round((counts.get("Neutral", 0) / total) * 100.0, 1)
+    neg_pct = round((counts.get("Negative", 0) / total) * 100.0, 1)
+
     breakdown = {
-        "Positive": round((counts.get("Positive", 0) / total) * 100.0, 1),
-        "Neutral": round((counts.get("Neutral", 0) / total) * 100.0, 1),
-        "Negative": round((counts.get("Negative", 0) / total) * 100.0, 1),
+        "Positive": pos_pct,
+        "Neutral": neu_pct,
+        "Negative": neg_pct,
     }
 
     pos_texts = subset[subset[sentiment_col] == "Positive"]["feedback_text"].tolist()
     neg_texts = subset[subset[sentiment_col] == "Negative"]["feedback_text"].tolist()
     neu_texts = subset[subset[sentiment_col] == "Neutral"]["feedback_text"].tolist()
 
+    pos_highlights = summarize_texts(pos_texts, num_sentences=3)
+    neg_highlights = summarize_texts(neg_texts, num_sentences=3)
+    neu_highlights = summarize_texts(neu_texts, num_sentences=3)
+
+    if pos_pct >= neg_pct + 10:
+        stance = "predominantly favorable"
+    elif neg_pct >= pos_pct + 10:
+        stance = "predominantly critical"
+    else:
+        stance = "mixed and polarized"
+
+    verdict = (
+        f"Across {total:,} analyzed citizen responses for {policy_name}, public reaction is {stance} "
+        f"({pos_pct}% supportive, {neu_pct}% constructive suggestions, {neg_pct}% critical concerns)."
+    )
+
     return {
         "policy_name": policy_name,
         "total_responses": int(total),
         "sentiment_breakdown": breakdown,
-        "positive_highlights": summarize_texts(pos_texts, num_sentences=3),
-        "concern_highlights": summarize_texts(neg_texts, num_sentences=3),
-        "suggestion_highlights": summarize_texts(neu_texts, num_sentences=3),
+        "plain_language_verdict": verdict,
+        "positive_highlights": pos_highlights,
+        "concern_highlights": neg_highlights,
+        "suggestion_highlights": neu_highlights,
     }

@@ -1,5 +1,7 @@
 export type SentimentLabel = 'Positive' | 'Neutral' | 'Negative';
 
+export type SupportedFileType = 'CSV' | 'Excel' | 'JSON' | 'TXT' | 'PDF';
+
 export interface FeedbackRecord {
   feedback_id: string;
   submitted_date: string;
@@ -15,6 +17,17 @@ export interface FeedbackRecord {
   cleaned_text: string;
 }
 
+export interface IngestionMetadata {
+  fileName: string;
+  fileType: SupportedFileType;
+  rawRowCount: number;
+  validRowCount: number;
+  droppedEmptyCount: number;
+  detectedColumns: Record<string, string>;
+  inferredColumns: string[];
+  hasGroundTruth: boolean;
+}
+
 export interface TopicCluster {
   topic_id: number;
   label: string;
@@ -23,10 +36,17 @@ export interface TopicCluster {
   share_percent: number;
 }
 
+export interface TopicRelevanceMetrics {
+  distinctiveness: number;
+  coherence: number;
+  coveragePercent: number;
+}
+
 export interface PolicyExecutiveSummary {
   policy_name: string;
   total_responses: number;
   breakdown: Record<SentimentLabel, number>;
+  plain_language_verdict: string;
   positive_highlights: string[];
   concern_highlights: string[];
   suggestion_highlights: string[];

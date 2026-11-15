@@ -17,7 +17,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.data_loader import DataIngestionError, load_feedback_csv
+from src.data_loader import DataIngestionError, load_feedback_csv, load_feedback_file
 from src.multilingual import compute_lexicon_polarity, detect_language_label, translate_to_english
 from src.preprocessor import clean_text, split_sentences, tokenize_bilingual
 
@@ -36,7 +36,7 @@ class TestDataIngestionAndPreprocessing(unittest.TestCase):
         self.assertIn("month", df.columns)
 
     def test_missing_required_column_raises_error(self):
-        bad_csv = "feedback_id,feedback_text\nFB-1,Missing columns test\n"
+        bad_csv = "feedback_id,unrelated_col\nFB-1,Missing columns test\n"
         with self.assertRaises(DataIngestionError):
             load_feedback_csv(io.StringIO(bad_csv))
 
@@ -60,6 +60,17 @@ class TestDataIngestionAndPreprocessing(unittest.TestCase):
         df = load_feedback_csv(io.StringIO(header + "\n".join(rows)), require_target=False)
         self.assertEqual(len(df), 100)
         self.assertEqual(df.attrs.get("loaded_row_count"), 100)
+
+    def test_alias_detection_and_json_txt_ingestion(self):
+        json_payload = '[{"comment_text": "Solar microgrid improved evening lighting.", "state": "Bihar"}]'
+        df_json = load_feedback_file(io.BytesIO(json_payload.encode("utf-8")), filename="sample.json")
+        self.assertEqual(len(df_json), 1)
+        self.assertEqual(df_json.iloc[0]["region"], "Bihar")
+        self.assertEqual(df_json.iloc[0]["policy_name"], "Rural Solar Microgrid Scheme")
+
+        txt_payload = "1. Hospital registration is fast and transparent.\n2. Bus subsidy reimbursement is delayed.\n"
+        df_txt = load_feedback_file(io.BytesIO(txt_payload.encode("utf-8")), filename="notes.txt")
+        self.assertEqual(len(df_txt), 2)
 
     def test_bilingual_cleaning_preserves_devanagari(self):
         raw_hi = "सरकार की योजना https://example.com बहुत लाभदायक है! 123"

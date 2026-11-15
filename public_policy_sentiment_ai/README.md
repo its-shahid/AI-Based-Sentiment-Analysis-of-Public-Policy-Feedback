@@ -8,7 +8,7 @@ Designed for a CSE AI/ML capstone project and optimized to run smoothly on a **W
 
 ## Key Capabilities
 
-- **Bilingual Ingestion & Cleaning (`src/data_loader.py`, `src/preprocessor.py`)**: UTF-8-SIG / CP1252 CSV support, schema validation, deduplication, Devanagari NFC Unicode normalization, and English/Hindi stopword removal.
+- **Multi-Format Ingestion & Cleaning (`src/data_loader.py`, `src/preprocessor.py`)**: Supports **CSV (`.csv`), Excel (`.xlsx`, `.xls`), JSON (`.json`), TXT (`.txt`), and PDF (`.pdf`)** with automatic column-alias detection (`feedback_text`, `comment`, `opinion`, `review`, etc.), intelligent inference of missing metadata, Devanagari NFC Unicode normalization, and English/Hindi stopword removal.
 - **Multilingual Language Detection & Lexicon Fusion (`src/multilingual.py`)**: Deterministic script-ratio detection (`English`, `Hindi`, `Hindi (Hinglish)`), negation-aware bilingual sentiment lexicon, and optional cross-lingual English glossing.
 - **Supervised Sentiment Analysis (`src/sentiment_model.py`)**: Word (1–2 gram) + Character (`char_wb` 3–5 gram) TF-IDF `FeatureUnion` benchmarking **Logistic Regression**, **Multinomial Naive Bayes**, and **Calibrated Linear SVM**.
 - **Topic Modeling (`src/topic_modeling.py`)**: NMF and LDA extraction separating **Common Concerns** (Negative cluster) from **Citizen Suggestions** (Neutral/Constructive cluster).

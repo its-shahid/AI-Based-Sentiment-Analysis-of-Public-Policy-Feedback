@@ -1,340 +1,429 @@
-import React, { useState } from 'react';
-import type { FeedbackRecord, SentimentLabel } from '../types/policy';
+import React, { useEffect, useMemo, useRef } from 'react';
+import Plotly from 'plotly.js-dist-min';
+import type { FeedbackRecord, SentimentLabel, TopicCluster } from '../types/policy';
 
 const COLORS: Record<SentimentLabel, string> = {
-  Positive: '#15803D',
-  Neutral: '#B45309',
-  Negative: '#B91C1C',
+  Positive: '#16A34A',
+  Neutral: '#D97706',
+  Negative: '#DC2626',
 };
 
-const BG_TINTS: Record<SentimentLabel, string> = {
-  Positive: '#DCFCE7',
-  Neutral: '#FEF3C7',
-  Negative: '#FEE2E2',
+const FONT_FAMILY = "'Public Sans', 'Noto Sans Devanagari', system-ui, sans-serif";
+
+interface PlotlyChartProps {
+  data: Array<Record<string, unknown>>;
+  layout: Record<string, unknown>;
+  height?: number;
+  ariaLabel: string;
+}
+
+const PlotlyChart: React.FC<PlotlyChartProps> = ({
+  data,
+  layout,
+  height = 320,
+  ariaLabel,
+}) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const mergedLayout: Record<string, unknown> = {
+      font: {
+        family: FONT_FAMILY,
+        size: 13,
+        color: '#0B1F3A',
+      },
+      paper_bgcolor: '#FFFFFF',
+      plot_bgcolor: '#FFFFFF',
+      hoverlabel: {
+        bgcolor: '#0B1F3A',
+        bordercolor: '#163A70',
+        font: { family: FONT_FAMILY, size: 13, color: '#FFFFFF' },
+      },
+      ...layout,
+      height,
+    };
+
+    const config: Record<string, unknown> = {
+      responsive: true,
+      displayModeBar: true,
+      displaylogo: false,
+      modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d'],
+    };
+
+    void Plotly.react(el, data, mergedLayout, config);
+
+    const observer = new ResizeObserver(() => {
+      if (el) {
+        try {
+          Plotly.Plots.resize(el);
+        } catch {
+          // Ignore resize errors while unmounting
+        }
+      }
+    });
+    observer.observe(el);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [data, layout, height]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    return () => {
+      if (el) {
+        try {
+          Plotly.purge(el);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    };
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      role="img"
+      aria-label={ariaLabel}
+      className="w-full"
+      style={{ minHeight: `${height}px` }}
+    />
+  );
 };
 
 export const MonthlyTrendChart: React.FC<{ records: FeedbackRecord[] }> = ({ records }) => {
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-
-  const monthMap = new Map<string, Record<SentimentLabel, number>>();
-  for (const r of records) {
-    if (!monthMap.has(r.month)) {
-      monthMap.set(r.month, { Positive: 0, Neutral: 0, Negative: 0 });
+  const series = useMemo(() => {
+    const monthMap = new Map<string, Record<SentimentLabel, number>>();
+    for (const r of records) {
+      if (!monthMap.has(r.month)) {
+        monthMap.set(r.month, { Positive: 0, Neutral: 0, Negative: 0 });
+      }
+      monthMap.get(r.month)![r.predicted_sentiment] += 1;
     }
-    const entry = monthMap.get(r.month)!;
-    entry[r.predicted_sentiment] += 1;
-  }
-
-  const series = Array.from(monthMap.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([month, counts]) => ({ month, ...counts }));
+    return Array.from(monthMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, counts]) => ({ month, ...counts }));
+  }, [records]);
 
   if (series.length === 0) {
     return (
-      <div className="h-64 flex items-center justify-center text-sm text-slate-500">
-        No monthly trend data available for current filters.
+      <div className="h-72 flex items-center justify-center text-[15px] text-[#475569]">
+        No monthly trend data available for the active filters.
       </div>
     );
   }
 
-  const width = 620;
-  const height = 240;
-  const pad = { top: 18, right: 20, bottom: 32, left: 36 };
-  const plotW = width - pad.left - pad.right;
-  const plotH = height - pad.top - pad.bottom;
-
-  const maxVal = Math.max(
-    4,
-    ...series.flatMap((d) => [d.Positive, d.Neutral, d.Negative])
+  const xValues = series.map((d) => d.month);
+  const traces: Array<Record<string, unknown>> = (['Positive', 'Neutral', 'Negative'] as SentimentLabel[]).map(
+    (label) => ({
+      type: 'scatter',
+      mode: 'lines+markers',
+      name: label,
+      x: xValues,
+      y: series.map((d) => d[label]),
+      line: { color: COLORS[label], width: 3 },
+      marker: { size: 8, color: COLORS[label], line: { color: '#FFFFFF', width: 1.5 } },
+      hovertemplate: `<b>${label}</b><br>Month: %{x}<br>Responses: %{y}<extra></extra>`,
+    })
   );
-  const yMax = Math.ceil(maxVal / 5) * 5;
 
-  const xPos = (idx: number) =>
-    series.length === 1
-      ? pad.left + plotW / 2
-      : pad.left + (idx / (series.length - 1)) * plotW;
-
-  const yPos = (val: number) => pad.top + plotH - (val / yMax) * plotH;
-
-  const buildPath = (key: SentimentLabel) =>
-    series
-      .map((d, i) => `${i === 0 ? 'M' : 'L'} ${xPos(i).toFixed(1)} ${yPos(d[key]).toFixed(1)}`)
-      .join(' ');
-
-  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((t) => Math.round(t * yMax));
+  const layout: Record<string, unknown> = {
+    margin: { l: 48, r: 16, t: 36, b: 48 },
+    hovermode: 'x unified',
+    legend: {
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.04,
+      xanchor: 'right',
+      x: 1,
+      font: { size: 13, color: '#0B1F3A' },
+    },
+    xaxis: {
+      title: { text: 'Consultation Month', font: { size: 13, color: '#334155' } },
+      showgrid: false,
+      tickfont: { size: 12, color: '#334155' },
+      linecolor: '#CBD8EC',
+    },
+    yaxis: {
+      title: { text: 'Feedback Count', font: { size: 13, color: '#334155' } },
+      gridcolor: '#E2E8F0',
+      zerolinecolor: '#CBD8EC',
+      tickfont: { size: 12, color: '#334155' },
+    },
+  };
 
   return (
-    <div className="relative">
-      <div className="flex items-center justify-end gap-5 mb-2 text-xs text-slate-600">
-        {(['Positive', 'Neutral', 'Negative'] as SentimentLabel[]).map((s) => (
-          <span key={s} className="inline-flex items-center gap-1.5">
-            <span className="inline-block w-3 h-0.5" style={{ backgroundColor: COLORS[s] }} />
-            {s}
-          </span>
-        ))}
-      </div>
-
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible">
-        {yTicks.map((tick) => {
-          const y = yPos(tick);
-          return (
-            <g key={tick}>
-              <line
-                x1={pad.left}
-                x2={width - pad.right}
-                y1={y}
-                y2={y}
-                stroke="#E2E8F0"
-                strokeDasharray="3 3"
-              />
-              <text
-                x={pad.left - 8}
-                y={y + 4}
-                textAnchor="end"
-                className="fill-slate-400 text-[10px] font-mono tabular-nums"
-              >
-                {tick}
-              </text>
-            </g>
-          );
-        })}
-
-        {(['Positive', 'Neutral', 'Negative'] as SentimentLabel[]).map((s) => (
-          <path
-            key={s}
-            d={buildPath(s)}
-            fill="none"
-            stroke={COLORS[s]}
-            strokeWidth={2.2}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-        ))}
-
-        {series.map((d, idx) => {
-          const x = xPos(idx);
-          const isHovered = hoveredIdx === idx;
-          return (
-            <g
-              key={d.month}
-              onMouseEnter={() => setHoveredIdx(idx)}
-              onMouseLeave={() => setHoveredIdx(null)}
-              className="cursor-pointer"
-            >
-              <rect
-                x={x - 16}
-                y={pad.top}
-                width={32}
-                height={plotH}
-                fill="transparent"
-              />
-              {isHovered && (
-                <line
-                  x1={x}
-                  x2={x}
-                  y1={pad.top}
-                  y2={pad.top + plotH}
-                  stroke="#94A3B8"
-                  strokeWidth={1}
-                  strokeDasharray="2 2"
-                />
-              )}
-              {(['Positive', 'Neutral', 'Negative'] as SentimentLabel[]).map((s) => (
-                <circle
-                  key={s}
-                  cx={x}
-                  cy={yPos(d[s])}
-                  r={isHovered ? 4.5 : 3}
-                  fill="#FFFFFF"
-                  stroke={COLORS[s]}
-                  strokeWidth={2}
-                />
-              ))}
-              <text
-                x={x}
-                y={height - 8}
-                textAnchor="middle"
-                className="fill-slate-500 text-[10px] font-mono tabular-nums"
-              >
-                {d.month.slice(5)}/{d.month.slice(2, 4)}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-
-      {hoveredIdx !== null && series[hoveredIdx] && (
-        <div className="mt-2 px-3 py-1.5 bg-slate-900 text-white text-xs rounded-md flex items-center justify-between font-mono tabular-nums">
-          <span>{series[hoveredIdx].month}</span>
-          <span className="text-emerald-300">Pos: {series[hoveredIdx].Positive}</span>
-          <span className="text-amber-300">Neu: {series[hoveredIdx].Neutral}</span>
-          <span className="text-red-300">Neg: {series[hoveredIdx].Negative}</span>
-        </div>
-      )}
-    </div>
+    <PlotlyChart
+      data={traces}
+      layout={layout}
+      height={320}
+      ariaLabel="Interactive Monthly Sentiment Trend Chart"
+    />
   );
 };
 
 export const SentimentDonutChart: React.FC<{ records: FeedbackRecord[] }> = ({ records }) => {
-  const counts: Record<SentimentLabel, number> = { Positive: 0, Neutral: 0, Negative: 0 };
-  for (const r of records) counts[r.predicted_sentiment] += 1;
-  const total = records.length || 1;
+  const counts = useMemo(() => {
+    const c: Record<SentimentLabel, number> = { Positive: 0, Neutral: 0, Negative: 0 };
+    for (const r of records) c[r.predicted_sentiment] += 1;
+    return c;
+  }, [records]);
 
-  const radius = 64;
-  const circumference = 2 * Math.PI * radius;
-  const items: SentimentLabel[] = ['Positive', 'Neutral', 'Negative'];
+  if (records.length === 0) {
+    return (
+      <div className="h-72 flex items-center justify-center text-[15px] text-[#475569]">
+        No feedback records available to chart.
+      </div>
+    );
+  }
 
-  let offsetAcc = 0;
-  const segments = items.map((label) => {
-    const val = counts[label];
-    const frac = val / total;
-    const len = frac * circumference;
-    const seg = { label, val, pct: ((val / total) * 100).toFixed(1), len, offset: -offsetAcc };
-    offsetAcc += len;
-    return seg;
-  });
+  const labels: SentimentLabel[] = ['Positive', 'Neutral', 'Negative'];
+  const values = labels.map((l) => counts[l]);
+
+  const traces: Array<Record<string, unknown>> = [
+    {
+      type: 'pie',
+      labels,
+      values,
+      hole: 0.56,
+      sort: false,
+      marker: {
+        colors: labels.map((l) => COLORS[l]),
+        line: { color: '#FFFFFF', width: 2.5 },
+      },
+      textinfo: 'percent',
+      textfont: { size: 13, color: '#FFFFFF', family: FONT_FAMILY },
+      hovertemplate: '<b>%{label}</b><br>Responses: %{value:,}<br>Share: %{percent}<extra></extra>',
+    },
+  ];
+
+  const layout: Record<string, unknown> = {
+    margin: { l: 12, r: 12, t: 24, b: 48 },
+    showlegend: true,
+    legend: {
+      orientation: 'h',
+      yanchor: 'top',
+      y: -0.06,
+      xanchor: 'center',
+      x: 0.5,
+      font: { size: 13, color: '#0B1F3A' },
+    },
+    annotations: [
+      {
+        text: `<b>${records.length.toLocaleString()}</b><br><span style="font-size:12px;color:#475569">Total</span>`,
+        showarrow: false,
+        font: { size: 22, color: '#0B1F3A', family: FONT_FAMILY },
+        x: 0.5,
+        y: 0.5,
+      },
+    ],
+  };
 
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-around gap-6 py-2">
-      <div className="relative w-44 h-44 shrink-0">
-        <svg viewBox="0 0 180 180" className="w-full h-full -rotate-90">
-          <circle cx="90" cy="90" r={radius} fill="none" stroke="#F1F5F9" strokeWidth="22" />
-          {records.length > 0 &&
-            segments.map((seg) => (
-              <circle
-                key={seg.label}
-                cx="90"
-                cy="90"
-                r={radius}
-                fill="none"
-                stroke={COLORS[seg.label]}
-                strokeWidth="22"
-                strokeDasharray={`${seg.len} ${circumference}`}
-                strokeDashoffset={seg.offset}
-              />
-            ))}
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-          <span className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
-            {records.length.toLocaleString()}
-          </span>
-          <span className="text-xs text-slate-500">Responses</span>
-        </div>
-      </div>
-
-      <div className="w-full max-w-xs divide-y divide-slate-100">
-        {segments.map((seg) => (
-          <div key={seg.label} className="py-2.5 flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2.5">
-              <span
-                className="inline-block w-2.5 h-2.5 rounded-xs"
-                style={{ backgroundColor: COLORS[seg.label] }}
-              />
-              <span className="font-medium text-slate-800">{seg.label}</span>
-            </div>
-            <div className="font-mono tabular-nums text-slate-700">
-              <span className="font-semibold text-slate-900">{seg.val}</span>
-              <span className="text-slate-400 ml-2">({seg.pct}%)</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+    <PlotlyChart
+      data={traces}
+      layout={layout}
+      height={320}
+      ariaLabel="Interactive Sentiment Distribution Donut Chart"
+    />
   );
 };
 
 export const PolicyBreakdownChart: React.FC<{ records: FeedbackRecord[] }> = ({ records }) => {
-  const map = new Map<string, Record<SentimentLabel, number>>();
-  for (const r of records) {
-    if (!map.has(r.policy_name)) map.set(r.policy_name, { Positive: 0, Neutral: 0, Negative: 0 });
-    map.get(r.policy_name)![r.predicted_sentiment] += 1;
-  }
-
-  const rows = Array.from(map.entries())
-    .map(([policy, counts]) => ({
-      policy,
-      ...counts,
-      total: counts.Positive + counts.Neutral + counts.Negative,
-    }))
-    .sort((a, b) => b.total - a.total);
+  const rows = useMemo(() => {
+    const map = new Map<string, Record<SentimentLabel, number>>();
+    for (const r of records) {
+      if (!map.has(r.policy_name)) map.set(r.policy_name, { Positive: 0, Neutral: 0, Negative: 0 });
+      map.get(r.policy_name)![r.predicted_sentiment] += 1;
+    }
+    return Array.from(map.entries())
+      .map(([policy, counts]) => ({
+        policy,
+        ...counts,
+        total: counts.Positive + counts.Neutral + counts.Negative,
+      }))
+      .sort((a, b) => a.total - b.total);
+  }, [records]);
 
   if (rows.length === 0) {
-    return <div className="text-sm text-slate-500 py-8 text-center">No policies in current selection.</div>;
+    return (
+      <div className="h-72 flex items-center justify-center text-[15px] text-[#475569]">
+        No policies match the current filter selection.
+      </div>
+    );
   }
 
+  const yLabels = rows.map((r) => (r.policy.length > 34 ? `${r.policy.slice(0, 32)}…` : r.policy));
+  const traces: Array<Record<string, unknown>> = (['Positive', 'Neutral', 'Negative'] as SentimentLabel[]).map(
+    (label) => ({
+      type: 'bar',
+      orientation: 'h',
+      name: label,
+      y: yLabels,
+      x: rows.map((r) => r[label]),
+      customdata: rows.map((r) => r.policy),
+      marker: { color: COLORS[label] },
+      hovertemplate: `<b>%{customdata}</b><br>${label}: %{x} responses<extra></extra>`,
+    })
+  );
+
+  const chartHeight = Math.max(300, Math.min(460, rows.length * 46 + 90));
+
+  const layout: Record<string, unknown> = {
+    barmode: 'stack',
+    margin: { l: 210, r: 20, t: 36, b: 44 },
+    legend: {
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.03,
+      xanchor: 'right',
+      x: 1,
+      font: { size: 13, color: '#0B1F3A' },
+    },
+    xaxis: {
+      title: { text: 'Responses', font: { size: 13, color: '#334155' } },
+      gridcolor: '#E2E8F0',
+      tickfont: { size: 12, color: '#334155' },
+    },
+    yaxis: {
+      automargin: true,
+      tickfont: { size: 12, color: '#0B1F3A' },
+    },
+  };
+
   return (
-    <div className="space-y-3.5">
-      {rows.map((row) => {
-        const posW = (row.Positive / row.total) * 100;
-        const neuW = (row.Neutral / row.total) * 100;
-        const negW = (row.Negative / row.total) * 100;
-        return (
-          <div key={row.policy} className="space-y-1.5">
-            <div className="flex items-baseline justify-between gap-4 text-xs">
-              <span className="font-medium text-slate-800 truncate">{row.policy}</span>
-              <span className="font-mono tabular-nums text-slate-500 shrink-0">
-                {row.Positive}+ · {row.Neutral}~ · {row.Negative}- ({row.total})
-              </span>
-            </div>
-            <div className="h-3 w-full bg-slate-100 rounded-xs overflow-hidden flex">
-              <div
-                style={{ width: `${posW}%`, backgroundColor: COLORS.Positive }}
-                title={`Positive: ${row.Positive}`}
-              />
-              <div
-                style={{ width: `${neuW}%`, backgroundColor: COLORS.Neutral }}
-                title={`Neutral: ${row.Neutral}`}
-              />
-              <div
-                style={{ width: `${negW}%`, backgroundColor: COLORS.Negative }}
-                title={`Negative: ${row.Negative}`}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
+    <PlotlyChart
+      data={traces}
+      layout={layout}
+      height={chartHeight}
+      ariaLabel="Interactive Sentiment Breakdown by Public Policy Scheme"
+    />
   );
 };
 
 export const LanguageSplitChart: React.FC<{ records: FeedbackRecord[] }> = ({ records }) => {
-  const map = new Map<string, Record<SentimentLabel, number>>();
-  for (const r of records) {
-    if (!map.has(r.language)) map.set(r.language, { Positive: 0, Neutral: 0, Negative: 0 });
-    map.get(r.language)![r.predicted_sentiment] += 1;
+  const rows = useMemo(() => {
+    const map = new Map<string, Record<SentimentLabel, number>>();
+    for (const r of records) {
+      if (!map.has(r.language)) map.set(r.language, { Positive: 0, Neutral: 0, Negative: 0 });
+      map.get(r.language)![r.predicted_sentiment] += 1;
+    }
+    return Array.from(map.entries())
+      .map(([lang, counts]) => ({
+        lang,
+        ...counts,
+        total: counts.Positive + counts.Neutral + counts.Negative,
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [records]);
+
+  if (rows.length === 0) {
+    return (
+      <div className="h-72 flex items-center justify-center text-[15px] text-[#475569]">
+        No language breakdown available.
+      </div>
+    );
   }
 
-  const rows = Array.from(map.entries()).map(([lang, counts]) => ({
-    lang,
-    ...counts,
-    total: counts.Positive + counts.Neutral + counts.Negative,
-  }));
+  const xLabels = rows.map((r) => r.lang);
+  const traces: Array<Record<string, unknown>> = (['Positive', 'Neutral', 'Negative'] as SentimentLabel[]).map(
+    (label) => ({
+      type: 'bar',
+      name: label,
+      x: xLabels,
+      y: rows.map((r) => r[label]),
+      marker: { color: COLORS[label] },
+      hovertemplate: `<b>%{x}</b><br>${label}: %{y} responses<extra></extra>`,
+    })
+  );
+
+  const layout: Record<string, unknown> = {
+    barmode: 'group',
+    margin: { l: 48, r: 16, t: 36, b: 56 },
+    legend: {
+      orientation: 'h',
+      yanchor: 'bottom',
+      y: 1.03,
+      xanchor: 'right',
+      x: 1,
+      font: { size: 13, color: '#0B1F3A' },
+    },
+    xaxis: {
+      tickfont: { size: 13, color: '#0B1F3A' },
+      linecolor: '#CBD8EC',
+    },
+    yaxis: {
+      title: { text: 'Feedback Count', font: { size: 13, color: '#334155' } },
+      gridcolor: '#E2E8F0',
+      tickfont: { size: 12, color: '#334155' },
+    },
+  };
 
   return (
-    <div className="space-y-4">
-      {rows.map((row) => (
-        <div key={row.lang} className="border-b border-slate-100 last:border-b-0 pb-3.5 last:pb-0">
-          <div className="flex items-center justify-between text-sm mb-2">
-            <span className="font-medium text-slate-900">{row.lang}</span>
-            <span className="font-mono tabular-nums text-xs text-slate-500">
-              {row.total} responses ({((row.total / (records.length || 1)) * 100).toFixed(1)}%)
-            </span>
-          </div>
-          <div className="grid grid-cols-3 gap-2 text-xs font-mono tabular-nums">
-            {(['Positive', 'Neutral', 'Negative'] as SentimentLabel[]).map((s) => (
-              <div
-                key={s}
-                className="px-2.5 py-1.5 rounded-sm flex items-center justify-between"
-                style={{ backgroundColor: BG_TINTS[s], color: COLORS[s] }}
-              >
-                <span>{s}</span>
-                <span className="font-semibold">{row[s]}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
+    <PlotlyChart
+      data={traces}
+      layout={layout}
+      height={320}
+      ariaLabel="Interactive Language Split Analysis Chart"
+    />
+  );
+};
+
+export const TopicFrequencyChart: React.FC<{ topics: TopicCluster[] }> = ({ topics }) => {
+  if (topics.length === 0) {
+    return (
+      <div className="h-64 flex items-center justify-center text-[15px] text-[#475569]">
+        No topic clusters extracted for the active filter.
+      </div>
+    );
+  }
+
+  const ordered = [...topics].reverse();
+  const traces: Array<Record<string, unknown>> = [
+    {
+      type: 'bar',
+      orientation: 'h',
+      y: ordered.map((t) => `${t.topic_id}. ${t.label}`),
+      x: ordered.map((t) => t.document_count),
+      text: ordered.map((t) => `${t.document_count} (${t.share_percent}%)`),
+      textposition: 'outside',
+      cliponaxis: false,
+      customdata: ordered.map((t) => t.keywords.join(', ')),
+      marker: {
+        color: '#2563EB',
+        line: { color: '#163A70', width: 1 },
+      },
+      hovertemplate:
+        '<b>%{y}</b><br>Documents: %{x}<br>Top Terms: %{customdata}<extra></extra>',
+    },
+  ];
+
+  const chartHeight = Math.max(280, topics.length * 52 + 70);
+
+  const layout: Record<string, unknown> = {
+    margin: { l: 210, r: 80, t: 16, b: 44 },
+    xaxis: {
+      title: { text: 'Assigned Documents', font: { size: 13, color: '#334155' } },
+      gridcolor: '#E2E8F0',
+      tickfont: { size: 12, color: '#334155' },
+    },
+    yaxis: {
+      automargin: true,
+      tickfont: { size: 13, color: '#0B1F3A' },
+    },
+  };
+
+  return (
+    <PlotlyChart
+      data={traces}
+      layout={layout}
+      height={chartHeight}
+      ariaLabel="Interactive Topic Frequency Distribution Chart"
+    />
   );
 };
 
@@ -343,57 +432,60 @@ export const ConfusionMatrixHeatmap: React.FC<{
   labels: SentimentLabel[];
 }> = ({ matrix, labels }) => {
   const maxVal = Math.max(1, ...matrix.flat());
+  const annotations: Array<Record<string, unknown>> = [];
+
+  matrix.forEach((row, rIdx) => {
+    row.forEach((val, cIdx) => {
+      annotations.push({
+        x: labels[cIdx],
+        y: labels[rIdx],
+        text: `<b>${val}</b>`,
+        showarrow: false,
+        font: {
+          size: 16,
+          family: FONT_FAMILY,
+          color: val / maxVal > 0.45 ? '#FFFFFF' : '#0B1F3A',
+        },
+      });
+    });
+  });
+
+  const traces: Array<Record<string, unknown>> = [
+    {
+      type: 'heatmap',
+      z: matrix,
+      x: labels,
+      y: labels,
+      colorscale: [
+        [0, '#F4F7FC'],
+        [0.45, '#60A5FA'],
+        [1, '#0B1F3A'],
+      ],
+      showscale: true,
+      hovertemplate: 'Actual: %{y}<br>Predicted: %{x}<br>Count: %{z}<extra></extra>',
+    },
+  ];
+
+  const layout: Record<string, unknown> = {
+    margin: { l: 84, r: 24, t: 20, b: 56 },
+    annotations,
+    xaxis: {
+      title: { text: 'Predicted Label', font: { size: 13, color: '#334155' } },
+      tickfont: { size: 13, color: '#0B1F3A' },
+    },
+    yaxis: {
+      title: { text: 'Actual Ground Truth', font: { size: 13, color: '#334155' } },
+      autorange: 'reversed',
+      tickfont: { size: 13, color: '#0B1F3A' },
+    },
+  };
 
   return (
-    <div className="overflow-x-auto">
-      <div className="inline-block min-w-full">
-        <div className="text-xs text-slate-500 mb-2 text-center font-medium">
-          Predicted Label (Columns) vs. Actual Ground Truth (Rows)
-        </div>
-        <table className="w-full border-collapse text-sm font-mono tabular-nums">
-          <thead>
-            <tr>
-              <th className="p-2 text-left text-xs font-medium text-slate-500 border-b border-slate-200">
-                Actual \ Pred
-              </th>
-              {labels.map((lbl) => (
-                <th
-                  key={lbl}
-                  className="p-2 text-center text-xs font-semibold text-slate-700 border-b border-slate-200"
-                >
-                  {lbl}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {matrix.map((row, rIdx) => (
-              <tr key={labels[rIdx]}>
-                <td className="p-2.5 text-xs font-semibold text-slate-700 border-r border-slate-200">
-                  {labels[rIdx]}
-                </td>
-                {row.map((val, cIdx) => {
-                  const intensity = val / maxVal;
-                  const isDiag = rIdx === cIdx;
-                  const bg = isDiag
-                    ? `rgba(29, 78, 216, ${0.14 + intensity * 0.72})`
-                    : `rgba(220, 38, 38, ${val === 0 ? 0.02 : 0.08 + intensity * 0.35})`;
-                  const textColor = isDiag && intensity > 0.45 ? '#FFFFFF' : '#0F172A';
-                  return (
-                    <td
-                      key={labels[cIdx]}
-                      className="p-3 text-center border border-slate-200 font-semibold"
-                      style={{ backgroundColor: bg, color: textColor }}
-                    >
-                      {val}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <PlotlyChart
+      data={traces}
+      layout={layout}
+      height={320}
+      ariaLabel="Interactive Confusion Matrix Heatmap"
+    />
   );
 };

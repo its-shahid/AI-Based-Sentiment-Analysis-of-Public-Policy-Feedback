@@ -9,9 +9,9 @@ interface ExplorerTabProps {
 type SortKey = 'submitted_date' | 'policy_name' | 'language' | 'predicted_sentiment' | 'confidence';
 
 const SENTIMENT_TEXT_COLOR: Record<SentimentLabel, string> = {
-  Positive: 'text-emerald-700',
-  Neutral: 'text-amber-700',
-  Negative: 'text-red-700',
+  Positive: 'text-[#15803D]',
+  Neutral: 'text-[#B45309]',
+  Negative: 'text-[#B91C1C]',
 };
 
 export const ExplorerTab: React.FC<ExplorerTabProps> = ({ records }) => {
@@ -95,18 +95,18 @@ export const ExplorerTab: React.FC<ExplorerTabProps> = ({ records }) => {
   };
 
   return (
-    <div className="space-y-5">
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="space-y-6">
+      <div className="bg-white border border-[#DCE5F2] rounded-xl shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-[#E2E8F0] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">Feedback Explorer</h2>
-            <p className="text-xs text-slate-500 mt-0.5 font-mono tabular-nums">
+            <h2 className="text-[22px] font-semibold text-[#0B1F3A]">Feedback Explorer</h2>
+            <p className="text-[14px] text-[#475569] mt-1 font-mono tabular-nums">
               {sorted.length === 0
                 ? 'Showing 0 records'
                 : `Showing ${startIdx + 1}–${startIdx + pageRows.length} of ${sorted.length.toLocaleString()} matching records · Click any row to inspect NLP tokens`}
             </p>
           </div>
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
             <select
               aria-label="Rows per page"
               value={pageSize}
@@ -114,7 +114,7 @@ export const ExplorerTab: React.FC<ExplorerTabProps> = ({ records }) => {
                 setPageSize(Number(e.target.value));
                 setPage(1);
               }}
-              className="px-2.5 py-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-md text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-600"
+              className="px-3 py-2 text-[14px] font-mono bg-[#F4F7FC] border border-[#CBD8EC] rounded-lg text-[#0B1F3A] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
             >
               <option value={25}>25 / page</option>
               <option value={50}>50 / page</option>
@@ -125,9 +125,9 @@ export const ExplorerTab: React.FC<ExplorerTabProps> = ({ records }) => {
               type="button"
               onClick={handleExportCsv}
               disabled={sorted.length === 0}
-              className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2 text-[14px] font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg disabled:opacity-50 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <Download className="w-3.5 h-3.5" />
+              <Download className="w-4 h-4" />
               Export Filtered CSV
             </button>
           </div>
@@ -136,61 +136,61 @@ export const ExplorerTab: React.FC<ExplorerTabProps> = ({ records }) => {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
-                <th className="py-2.5 px-4 whitespace-nowrap">ID</th>
-                <th className="py-2.5 px-4 whitespace-nowrap">
+              <tr className="bg-[#F4F7FC] border-b border-[#DCE5F2] text-[14px] font-semibold text-[#163A70]">
+                <th className="py-3 px-4 whitespace-nowrap">ID</th>
+                <th className="py-3 px-4 whitespace-nowrap">
                   <button
                     type="button"
                     onClick={() => toggleSort('submitted_date')}
-                    className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
+                    className="inline-flex items-center gap-1 hover:text-[#0B1F3A] cursor-pointer"
                   >
-                    Date <ArrowUpDown className="w-3 h-3" />
+                    Date <ArrowUpDown className="w-3.5 h-3.5" />
                   </button>
                 </th>
-                <th className="py-2.5 px-4 whitespace-nowrap">
+                <th className="py-3 px-4 whitespace-nowrap">
                   <button
                     type="button"
                     onClick={() => toggleSort('policy_name')}
-                    className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
+                    className="inline-flex items-center gap-1 hover:text-[#0B1F3A] cursor-pointer"
                   >
-                    Policy Scheme <ArrowUpDown className="w-3 h-3" />
+                    Policy Scheme <ArrowUpDown className="w-3.5 h-3.5" />
                   </button>
                 </th>
-                <th className="py-2.5 px-4 whitespace-nowrap">Region</th>
-                <th className="py-2.5 px-4 whitespace-nowrap">
+                <th className="py-3 px-4 whitespace-nowrap">Region</th>
+                <th className="py-3 px-4 whitespace-nowrap">
                   <button
                     type="button"
                     onClick={() => toggleSort('language')}
-                    className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
+                    className="inline-flex items-center gap-1 hover:text-[#0B1F3A] cursor-pointer"
                   >
-                    Lang <ArrowUpDown className="w-3 h-3" />
+                    Lang <ArrowUpDown className="w-3.5 h-3.5" />
                   </button>
                 </th>
-                <th className="py-2.5 px-4 whitespace-nowrap">
+                <th className="py-3 px-4 whitespace-nowrap">
                   <button
                     type="button"
                     onClick={() => toggleSort('predicted_sentiment')}
-                    className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
+                    className="inline-flex items-center gap-1 hover:text-[#0B1F3A] cursor-pointer"
                   >
-                    Sentiment <ArrowUpDown className="w-3 h-3" />
+                    Sentiment <ArrowUpDown className="w-3.5 h-3.5" />
                   </button>
                 </th>
-                <th className="py-2.5 px-4 text-right whitespace-nowrap">
+                <th className="py-3 px-4 text-right whitespace-nowrap">
                   <button
                     type="button"
                     onClick={() => toggleSort('confidence')}
-                    className="inline-flex items-center gap-1 hover:text-slate-900 cursor-pointer"
+                    className="inline-flex items-center gap-1 hover:text-[#0B1F3A] cursor-pointer"
                   >
-                    Conf <ArrowUpDown className="w-3 h-3" />
+                    Conf <ArrowUpDown className="w-3.5 h-3.5" />
                   </button>
                 </th>
-                <th className="py-2.5 px-4 min-w-[280px]">Citizen Feedback</th>
+                <th className="py-3 px-4 min-w-[300px]">Citizen Feedback</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-xs">
+            <tbody className="divide-y divide-[#E2E8F0] text-[15px]">
               {pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-slate-500">
+                  <td colSpan={8} className="py-10 text-center text-[#64748B]">
                     No records match the current filters.
                   </td>
                 </tr>
@@ -205,28 +205,32 @@ export const ExplorerTab: React.FC<ExplorerTabProps> = ({ records }) => {
                         setSelectedRecordKey(isSelected ? null : rowKey);
                         setSelectedRecord(isSelected ? null : row);
                       }}
-                      className={`h-10 cursor-pointer transition-colors ${
-                        isSelected ? 'bg-blue-50/70' : 'hover:bg-slate-50'
+                      className={`cursor-pointer transition-colors ${
+                        isSelected ? 'bg-[#EFF6FF]' : 'hover:bg-[#F4F7FC]'
                       }`}
                     >
-                      <td className="py-2 px-4 font-mono tabular-nums text-slate-500 whitespace-nowrap">
+                      <td className="py-3 px-4 font-mono tabular-nums text-[14px] text-[#475569] whitespace-nowrap">
                         {row.feedback_id}
                       </td>
-                      <td className="py-2 px-4 font-mono tabular-nums text-slate-600 whitespace-nowrap">
+                      <td className="py-3 px-4 font-mono tabular-nums text-[14px] text-[#334155] whitespace-nowrap">
                         {row.submitted_date}
                       </td>
-                      <td className="py-2 px-4 font-medium text-slate-800 whitespace-nowrap">
+                      <td className="py-3 px-4 font-medium text-[#0B1F3A] whitespace-nowrap">
                         {row.policy_name}
                       </td>
-                      <td className="py-2 px-4 text-slate-600 whitespace-nowrap">{row.region}</td>
-                      <td className="py-2 px-4 text-slate-600 whitespace-nowrap">{row.language}</td>
-                      <td className={`py-2 px-4 font-semibold whitespace-nowrap ${SENTIMENT_TEXT_COLOR[row.predicted_sentiment]}`}>
+                      <td className="py-3 px-4 text-[#475569] whitespace-nowrap">{row.region}</td>
+                      <td className="py-3 px-4 text-[#475569] whitespace-nowrap">{row.language}</td>
+                      <td
+                        className={`py-3 px-4 font-semibold whitespace-nowrap ${
+                          SENTIMENT_TEXT_COLOR[row.predicted_sentiment]
+                        }`}
+                      >
                         {row.predicted_sentiment}
                       </td>
-                      <td className="py-2 px-4 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
+                      <td className="py-3 px-4 text-right font-mono tabular-nums text-[14px] text-[#0B1F3A] whitespace-nowrap">
                         {(row.confidence * 100).toFixed(1)}%
                       </td>
-                      <td className="py-2 px-4 text-slate-700 max-w-md truncate">
+                      <td className="py-3 px-4 text-[#1E293B] max-w-md truncate">
                         {row.feedback_text}
                       </td>
                     </tr>
@@ -238,16 +242,16 @@ export const ExplorerTab: React.FC<ExplorerTabProps> = ({ records }) => {
         </div>
 
         {/* Pagination Footer */}
-        <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600">
+        <div className="px-6 py-3.5 border-t border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-between text-[14px] text-[#334155]">
           <span className="font-mono tabular-nums">
             Page {safePage} of {totalPages}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <button
               type="button"
               disabled={safePage <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="px-3 py-1.5 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+              className="px-3.5 py-1.5 bg-white border border-[#CBD8EC] rounded-lg hover:bg-[#EFF6FF] disabled:opacity-40 font-medium cursor-pointer"
             >
               Previous
             </button>
@@ -255,7 +259,7 @@ export const ExplorerTab: React.FC<ExplorerTabProps> = ({ records }) => {
               type="button"
               disabled={safePage >= totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="px-3 py-1.5 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+              className="px-3.5 py-1.5 bg-white border border-[#CBD8EC] rounded-lg hover:bg-[#EFF6FF] disabled:opacity-40 font-medium cursor-pointer"
             >
               Next
             </button>
@@ -265,41 +269,49 @@ export const ExplorerTab: React.FC<ExplorerTabProps> = ({ records }) => {
 
       {/* Selected Row Detail Inspection Panel */}
       {selectedRecord && (
-        <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <div className="flex items-start justify-between gap-4 pb-3 border-b border-slate-100">
+        <div className="bg-white border border-[#DCE5F2] rounded-xl shadow-sm p-6">
+          <div className="flex items-start justify-between gap-4 pb-3 border-b border-[#E2E8F0]">
             <div>
-              <div className="text-xs text-slate-500 font-mono tabular-nums">
-                {selectedRecord.feedback_id} · {selectedRecord.submitted_date} · {selectedRecord.region} · {selectedRecord.channel}
+              <div className="text-[14px] text-[#475569] font-mono tabular-nums">
+                {selectedRecord.feedback_id} · {selectedRecord.submitted_date} ·{' '}
+                {selectedRecord.region} · {selectedRecord.channel}
               </div>
-              <h3 className="text-sm font-semibold text-slate-900 mt-1">
+              <h3 className="text-[20px] font-semibold text-[#0B1F3A] mt-1">
                 {selectedRecord.policy_name}
               </h3>
             </div>
             <button
               type="button"
-              onClick={() => setSelectedRecord(null)}
-              className="text-xs text-slate-500 hover:text-slate-800 cursor-pointer"
+              onClick={() => {
+                setSelectedRecord(null);
+                setSelectedRecordKey(null);
+              }}
+              className="text-[14px] font-semibold text-[#163A70] hover:underline cursor-pointer"
             >
               Close
             </button>
           </div>
-          <p className="mt-3 text-sm text-slate-800 leading-relaxed">
+          <p className="mt-4 text-[16px] text-[#0B1F3A] leading-relaxed">
             {selectedRecord.feedback_text}
           </p>
-          <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+          <div className="mt-4 pt-4 border-t border-[#E2E8F0] grid grid-cols-1 md:grid-cols-3 gap-4 text-[14px]">
             <div>
-              <span className="text-slate-500">Predicted Sentiment: </span>
-              <span className={`font-semibold ${SENTIMENT_TEXT_COLOR[selectedRecord.predicted_sentiment]}`}>
+              <span className="text-[#475569]">Predicted Sentiment: </span>
+              <span
+                className={`font-semibold ${
+                  SENTIMENT_TEXT_COLOR[selectedRecord.predicted_sentiment]
+                }`}
+              >
                 {selectedRecord.predicted_sentiment} ({(selectedRecord.confidence * 100).toFixed(1)}%)
               </span>
             </div>
             <div>
-              <span className="text-slate-500">Dataset Label: </span>
-              <span className="font-medium text-slate-800">{selectedRecord.sentiment}</span>
+              <span className="text-[#475569]">Dataset Label: </span>
+              <span className="font-semibold text-[#0B1F3A]">{selectedRecord.sentiment}</span>
             </div>
             <div>
-              <span className="text-slate-500">Preprocessed Tokens: </span>
-              <span className="font-mono text-slate-700">{selectedRecord.cleaned_text}</span>
+              <span className="text-[#475569]">Preprocessed Tokens: </span>
+              <span className="font-mono text-[#163A70]">{selectedRecord.cleaned_text}</span>
             </div>
           </div>
         </div>
