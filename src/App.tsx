@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   BarChart3,
   Code2,
-  Download,
   Gauge,
   Languages,
   Layers,
@@ -13,7 +12,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { downloadPythonProjectZip, getDefaultCsvText } from './data/projectBundle';
+import { getDefaultCsvText } from './data/projectBundle';
 import { ingestAndAnalyzeCsv, ingestStructuredRows } from './nlp/engine';
 import { parseUploadedFile } from './nlp/fileParsers';
 import type {
@@ -420,8 +419,8 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
-            {!isOverview && (
+          {!isOverview && (
+            <div className="flex items-center gap-3 shrink-0">
               <button
                 type="button"
                 onClick={() => setShowUploadPanelDrawer((prev) => !prev)}
@@ -430,16 +429,8 @@ export default function App() {
                 <Upload className="w-4 h-4" />
                 {showUploadPanelDrawer ? 'Hide Uploader' : 'Upload Dataset'}
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => downloadPythonProjectZip()}
-              className="inline-flex items-center gap-2 px-4 py-2.5 text-[14px] font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-            >
-              <Download className="w-4 h-4" />
-              Download Python ZIP
-            </button>
-          </div>
+            </div>
+          )}
         </header>
 
         {/* Active View Viewport */}
