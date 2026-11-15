@@ -1,0 +1,6 @@
+{
+  "name": "CivicPulse — AI-Based Sentiment Analysis of Public Policy Feedback",
+  "description": "End-to-end NLP & Machine Learning platform for multilingual (English & Hindi) public policy sentiment analysis, topic modeling, opinion summarization, and model evaluation, with a complete downloadable Python & Streamlit codebase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
